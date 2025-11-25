@@ -1,8 +1,13 @@
 
 #pragma kernel UpdateBoids
-#pragma kernal AssignCells
-#pragma kernal ClearCells
-#pragma kernal RadSortCells
+#pragma kernel AssignCells
+#pragma kernel ClearCells
+#pragma kernel RadSortCells
+#pragma kernel RadixClear
+#pragma kernel RadixHistogram
+#pragma kernel RadixPrefixSum
+#pragma kernel RadixScatter
+#pragma kernel BuildCellRanges
 
 struct Boid
 {
@@ -16,31 +21,33 @@ struct BoidCell
     uint cellIndex;
 };
 
+#define RADIX_BITS 4
+#define RADIX_BUCKETS (1 << RADIX_BITS) // = 16
+#define RADIX_MASK (RADIX_BUCKETS - 1)
+
 
 RWStructuredBuffer<uint> CellStart;
 RWStructuredBuffer<uint> CellEnd;
-RWStructuredBuffer<uint> CellCounts;
+RWStructuredBuffer<uint> CellBucketCounts;
 
 RWStructuredBuffer<Boid> Boids;
 RWStructuredBuffer<BoidCell> BoidCells;
+RWStructuredBuffer<BoidCell> BoidCellsTemp;
+
+RWStructuredBuffer<uint> BucketCounts;   // 16 counters
+RWStructuredBuffer<uint> BucketCounters; //atomic counters for scatter
+RWStructuredBuffer<uint> BucketOffsets;  // prefix-summed offsets
 
 
+uint _Shift;
 
 uint _NumBoids;
 uint _NumCells;
 uint _NullCell;
 float _CellSize;
-float _CellRows;
-float _CellColls;
+float _CellSeats;
 
-[numthreads(256, 1, 1)]
-void ClearCells(uint id : SV_DispatchThreadID)
-{
-    if(id >= _NumCells) return;
 
-    CellStart[id] = _NullCell;
-    CellEnd[id] = _NullCell;
-}
 
 [numthreads(256, 1, 1)]
 void AssignCells(uint id : SV_DispatchThreadID)
@@ -51,18 +58,86 @@ void AssignCells(uint id : SV_DispatchThreadID)
 
     int2 cellCord= int2(floor(b.pos / _CellSize));
 
-    uint flattenedCord = (cellCord.x * _CellColls) + cellCord.y;
+    cellCord.x = clamp(cellCord.x, 0, _CellSeats - 1);
+    cellCord.y = clamp(cellCord.y, 0, _CellSeats - 1);
+
+    uint flattenedCord = (cellCord.x) + (cellCord.y * _CellSeats);
 
     BoidCells[id].boidIndex = id;
     BoidCells[id].cellIndex = flattenedCord;
 }
 
-[numthreads(64,1,1)]
-void RadSortCells(uint id : SV_DispatchThreadID)
+[numthreads(16, 1, 1)]
+void ClearCells(uint id : SV_DispatchThreadID)
+{
+    if(id >= _NumCells) return;
+    CellStart[id] = _NullCell;
+    CellEnd[id] = _NullCell;
+}
+
+
+[numthreads(RADIX_BUCKETS,1,1)]
+void RadixClear (uint id : SV_DispatchThreadID)
+{
+    if (id >= RADIX_BUCKETS) return;
+    BucketCounts[id] = 0;
+    BucketCounters[id] = 0;
+    BucketOffsets[id] = 0;
+}
+
+
+[numthreads(256,1,1)]
+void RadixHistogram(uint id : SV_DispatchThreadID)
 {
     if(id >= _NumBoids) return;
 
-    BoidCell bc = BoidCells[id]; 
+    uint cell = BoidCells[id].cellIndex;
+    uint activeMask = (_Shift >= 8) ? 0x1 : RADIX_MASK;
+    uint digit = (cell >> _Shift) & activeMask;
+
+    InterlockedAdd(BucketCounts[digit], 1); 
+}
+
+[numthreads(1,1,1)]
+void RadixPrefixSum(uint id : SV_DispatchThreadID)
+{
+
+    uint sum = 0;
+    for(uint i = 0; i < RADIX_BUCKETS; i++)
+    {
+        uint c = BucketCounts[i];
+        BucketOffsets[i] = sum;
+        sum+= c;
+    }
+}
+
+[numthreads(256,1,1)]
+void RadixScatter(uint id : SV_DispatchThreadID)
+{
+    if (id >= _NumBoids) return;
+    BoidCell bc = BoidCells[id];
+    uint activeMask = (_Shift >= 8) ? 0x1 : RADIX_MASK;
+    uint digit = (bc.cellIndex >> _Shift) & activeMask;
+
+    uint localOffset;
+    InterlockedAdd(BucketCounters[digit], 1, localOffset);
+    
+    uint finalindex = BucketOffsets[digit] + localOffset;
+    BoidCellsTemp[finalindex] = bc;
+}
+
+[numthreads(256, 1, 1)]
+void BuildCellRanges(uint id : SV_DispatchThreadID)
+{
+    if (id >= _NumBoids) return;
+
+    uint cell = BoidCells[id].cellIndex;
+
+    InterlockedMin(CellStart[cell], id);
+    
+    uint original;
+    InterlockedCompareExchange(CellEnd[cell], _NullCell, id, original);
+    InterlockedMax(CellEnd[cell], id);
 }
 
 [numthreads(256,1,1)]
