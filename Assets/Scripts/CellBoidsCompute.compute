@@ -1,0 +1,71 @@
+
+#pragma kernel UpdateBoids
+#pragma kernal AssignCells
+#pragma kernal ClearCells
+#pragma kernal RadSortCells
+
+struct Boid
+{
+    float2 pos;
+    float2 vel;
+};
+
+struct BoidCell
+{
+    uint boidIndex;
+    uint cellIndex;
+};
+
+
+RWStructuredBuffer<uint> CellStart;
+RWStructuredBuffer<uint> CellEnd;
+RWStructuredBuffer<uint> CellCounts;
+
+RWStructuredBuffer<Boid> Boids;
+RWStructuredBuffer<BoidCell> BoidCells;
+
+
+
+uint _NumBoids;
+uint _NumCells;
+uint _NullCell;
+float _CellSize;
+float _CellRows;
+float _CellColls;
+
+[numthreads(256, 1, 1)]
+void ClearCells(uint id : SV_DispatchThreadID)
+{
+    if(id >= _NumCells) return;
+
+    CellStart[id] = _NullCell;
+    CellEnd[id] = _NullCell;
+}
+
+[numthreads(256, 1, 1)]
+void AssignCells(uint id : SV_DispatchThreadID)
+{
+    if(id >= _NumBoids) return;
+
+    Boid b = Boids[id];
+
+    int2 cellCord= int2(floor(b.pos / _CellSize));
+
+    uint flattenedCord = (cellCord.x * _CellColls) + cellCord.y;
+
+    BoidCells[id].boidIndex = id;
+    BoidCells[id].cellIndex = flattenedCord;
+}
+
+[numthreads(64,1,1)]
+void RadSortCells(uint id : SV_DispatchThreadID)
+{
+    if(id >= _NumBoids) return;
+
+    BoidCell bc = BoidCells[id]; 
+}
+
+[numthreads(256,1,1)]
+void UpdateBoids (uint3 id : SV_DispatchThreadID)
+{
+}
