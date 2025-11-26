@@ -3,9 +3,11 @@
 #pragma kernel ClearCells
 // #pragma kernel RadSortCells
 #pragma kernel RadixClear
-#pragma kernel RadixHistogram
+//#pragma kernel RadixHistogram
+#pragma kernel RadixBlockHistogram
 #pragma kernel RadixPrefixSum
-#pragma kernel RadixScatter
+//#pragma kernel RadixScatter
+#pragma kernel RadixScatterStable
 #pragma kernel BuildCellRanges
 
 struct Boid
@@ -36,6 +38,11 @@ RWStructuredBuffer<BoidCell> BoidCellsTemp;
 RWStructuredBuffer<uint> BucketCounts;   // 16 counters
 RWStructuredBuffer<uint> BucketCounters; //atomic counters for scatter
 RWStructuredBuffer<uint> BucketOffsets;  // prefix-summed offsets
+RWStructuredBuffer<uint> BlockCounts;
+RWStructuredBuffer<uint> BlockOffsets;
+
+groupshared uint localCounts[RADIX_BUCKETS];
+groupshared uint localCounts2[RADIX_BUCKETS];
 
 
 uint _Shift;
@@ -85,15 +92,41 @@ void RadixClear (uint id : SV_DispatchThreadID)
 }
 
 
+// [numthreads(256,1,1)]
+// void RadixHistogram(uint id : SV_DispatchThreadID)
+// {
+//     if(id >= _NumBoids) return;
+
+//     uint cell = BoidCells[id].cellIndex;
+//     uint digit = (cell >> _Shift) & RADIX_MASK;
+
+//     InterlockedAdd(BucketCounts[digit], 1); 
+// }
+
 [numthreads(256,1,1)]
-void RadixHistogram(uint id : SV_DispatchThreadID)
+void RadixBlockHistogram(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3 dispatchId : SV_DispatchThreadID)
 {
-    if(id >= _NumBoids) return;
+    uint globalId = dispatchId.x;
 
-    uint cell = BoidCells[id].cellIndex;
-    uint digit = (cell >> _Shift) & RADIX_MASK;
+    for (uint i = id; i < RADIX_BUCKETS; i += 256)
+        localCounts[i] = 0;
+    GroupMemoryBarrierWithGroupSync();
 
-    InterlockedAdd(BucketCounts[digit], 1); 
+    if (globalId < _NumBoids)
+    {
+        uint cell = BoidCells[globalId].cellIndex;
+        uint digit = (cell >> _Shift) & RADIX_MASK;
+        InterlockedAdd(localCounts[digit], 1);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+
+    if (id == 0)
+    {
+        uint baseIndex = g.x * RADIX_BUCKETS;
+        for (uint b = 0; b < RADIX_BUCKETS; ++b)
+            BlockCounts[baseIndex + b] = localCounts[b];
+    }
 }
 
 [numthreads(1,1,1)]
@@ -109,18 +142,46 @@ void RadixPrefixSum(uint id : SV_DispatchThreadID)
     }
 }
 
-[numthreads(256,1,1)]
-void RadixScatter(uint id : SV_DispatchThreadID)
-{
-    if (id >= _NumBoids) return;
-    BoidCell bc = BoidCells[id];
-    uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
+// [numthreads(256,1,1)]
+// void RadixScatter(uint id : SV_DispatchThreadID)
+// {
+//     if (id >= _NumBoids) return;
+//     BoidCell bc = BoidCells[id];
+//     uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
 
-    uint localOffset;
-    InterlockedAdd(BucketCounters[digit], 1, localOffset);
+//     uint localOffset;
+//     InterlockedAdd(BucketCounters[digit], 1, localOffset);
     
-    uint finalindex = BucketOffsets[digit] + localOffset;
-    BoidCellsTemp[finalindex] = bc;
+//     uint finalindex = BucketOffsets[digit] + localOffset;
+//     BoidCellsTemp[finalindex] = bc;
+// }
+
+[numthreads(256,1,1)]
+void RadixScatterStable(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3 dispatchId : SV_DispatchThreadID)
+{
+    uint groupIndex = g.x;
+    uint globalId = dispatchId.x;
+
+    // initialize shared counters
+    for (uint i = id; i < RADIX_BUCKETS; i += 256)
+        localCounts2[i] = 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (globalId < _NumBoids)
+    {
+        BoidCell bc = BoidCells[globalId];
+        uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
+
+        // deterministic per-group rank: atomicAdd on group shared memory is deterministic in-group
+        uint localRank;
+        InterlockedAdd(localCounts2[digit], 1, localRank);
+
+        // compute final index = BlockOffsets[groupIndex*RADIX_BUCKETS + digit] + localRank
+        uint baseIndex = BlockOffsets[groupIndex * RADIX_BUCKETS + digit];
+        uint finalIndex = baseIndex + localRank;
+
+        BoidCellsTemp[finalIndex] = bc;
+    }
 }
 
 [numthreads(256, 1, 1)]

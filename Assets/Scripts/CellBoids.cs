@@ -21,6 +21,9 @@ public class CellBoids : MonoBehaviour
     private ComputeBuffer BucketCounts;
     private ComputeBuffer BucketOffsets;
     private ComputeBuffer BucketCounters;
+    private ComputeBuffer BlockCounts;
+    private ComputeBuffer BlockOffsets;
+    private int radix = 1 << 4;
 
     private const uint NullCell = 0xFFFFFFFF;
 
@@ -77,9 +80,9 @@ public class CellBoids : MonoBehaviour
         assignCellKernel = CellBoidsCompute.FindKernel("AssignCells");
         clearCellKernel = CellBoidsCompute.FindKernel("ClearCells");
         radixClearKernel = CellBoidsCompute.FindKernel("RadixClear");
-        radixHistKernel = CellBoidsCompute.FindKernel("RadixHistogram");
+        radixHistKernel = CellBoidsCompute.FindKernel("RadixBlockHistogram");
         radixPrefixKernel = CellBoidsCompute.FindKernel("RadixPrefixSum");
-        radixScatterKernel = CellBoidsCompute.FindKernel("RadixScatter");
+        radixScatterKernel = CellBoidsCompute.FindKernel("RadixScatterStable");
         buildRangesKernel = CellBoidsCompute.FindKernel("BuildCellRanges");
 
     }
@@ -144,10 +147,13 @@ public class CellBoids : MonoBehaviour
         CellEnd.SetData(cellEnd);
 
         //RADIX
-        int radix = 1 << 4;
+
         BucketCounts = new ComputeBuffer(radix, sizeof(uint));
         BucketOffsets = new ComputeBuffer(radix, sizeof(uint));
         BucketCounters = new ComputeBuffer(radix, sizeof(uint));
+
+        BlockCounts = new ComputeBuffer(boidGroup * radix, sizeof(uint));
+        BlockOffsets = new ComputeBuffer(boidGroup * radix, sizeof(uint));
 
         //Buffer bindings
 
@@ -158,24 +164,23 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetBuffer(clearCellKernel, "CellStart", CellStart);
         CellBoidsCompute.SetBuffer(clearCellKernel, "CellEnd", CellEnd);
 
-        // histogram/scatter kernels use BoidCells / BoidCellsTemp
-        CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", BoidCells);
-        CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", BoidCells);
-        CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", BoidCellsTemp);
-
-        // bind bucket buffers to kernels
         CellBoidsCompute.SetBuffer(radixClearKernel, "BucketCounts", BucketCounts);
         CellBoidsCompute.SetBuffer(radixClearKernel, "BucketCounters", BucketCounters);
         CellBoidsCompute.SetBuffer(radixClearKernel, "BucketOffsets", BucketOffsets);
 
+        CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", BoidCells);
+        CellBoidsCompute.SetBuffer(radixHistKernel, "BlockCounts", BlockCounts);
         CellBoidsCompute.SetBuffer(radixHistKernel, "BucketCounts", BucketCounts);
+
         CellBoidsCompute.SetBuffer(radixPrefixKernel, "BucketCounts", BucketCounts);
         CellBoidsCompute.SetBuffer(radixPrefixKernel, "BucketOffsets", BucketOffsets);
 
         CellBoidsCompute.SetBuffer(radixScatterKernel, "BucketOffsets", BucketOffsets);
         CellBoidsCompute.SetBuffer(radixScatterKernel, "BucketCounters", BucketCounters);
+        CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", BoidCells);
+        CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", BoidCellsTemp);
+        CellBoidsCompute.SetBuffer(radixScatterKernel, "BlockOffsets", BlockOffsets);
 
-        // build ranges uses sorted BoidCells (we will re-bind before dispatch)
         CellBoidsCompute.SetBuffer(buildRangesKernel, "BoidCells", BoidCells);
         CellBoidsCompute.SetBuffer(buildRangesKernel, "CellStart", CellStart);
         CellBoidsCompute.SetBuffer(buildRangesKernel, "CellEnd", CellEnd);
@@ -206,40 +211,77 @@ public class CellBoids : MonoBehaviour
     void RunRadixSort()
     {
         //PrintBoidCells("pre radix");
-
+        var inBuffer = BoidCells;
+        var outBuffer = BoidCellsTemp;
         int bits = 9; //512 cells
         for (int shift = 0; shift < bits; shift += 4)
         {
             CellBoidsCompute.SetInt("_Shift", shift);
+
 
             CellBoidsCompute.Dispatch(radixClearKernel, 1, 1, 1);
 
             ValidateRadixClear();
 
 
+            CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", inBuffer);
+
             CellBoidsCompute.Dispatch(radixHistKernel, boidGroup, 1, 1);
+
+            UpdateBlockOffsetsCounts();
 
 
             CellBoidsCompute.Dispatch(radixPrefixKernel, 1, 1, 1);
 
             ValidatePrefixOffsets();
 
-            CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", BoidCells);
-            CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", BoidCellsTemp);
+
+            CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", inBuffer);
+            CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", outBuffer);
 
             CellBoidsCompute.Dispatch(radixScatterKernel, boidGroup, 1, 1);
 
-            var temp = BoidCells;
-            BoidCells = BoidCellsTemp;
-            BoidCellsTemp = temp;
+            var temp = inBuffer;
+            inBuffer = outBuffer;
+            outBuffer = temp;
 
 
-            CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", BoidCells);
-            CellBoidsCompute.SetBuffer(buildRangesKernel, "BoidCells", BoidCells);
+            // CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", BoidCells);
+            // CellBoidsCompute.SetBuffer(buildRangesKernel, "BoidCells", BoidCells);
 
             PrintBoidCells($"post shift {shift}");
         }
+        BoidCells = inBuffer;
+        BoidCellsTemp = outBuffer;
         VerifySortedAndUnique();
+    }
+
+    void UpdateBlockOffsetsCounts()
+    {
+        uint[] blockCountsArr = new uint[boidGroup * radix];
+        BlockCounts.GetData(blockCountsArr);
+
+        uint[] blockOffsetsArr = new uint[boidGroup * radix];
+        uint[] bucketCountsArr = new uint[radix];
+
+        // For each bucket, scan groups in order
+        for (int bucket = 0; bucket < radix; bucket++)
+        {
+            uint off = 0;
+            uint total = 0;
+            for (int group = 0; group < boidGroup; group++)
+            {
+                int idx = group * radix + bucket;
+                blockOffsetsArr[idx] = off;
+                off += blockCountsArr[idx];
+
+                total += blockCountsArr[group * radix + bucket];
+            }
+            bucketCountsArr[bucket] = total;
+        }
+
+        BlockOffsets.SetData(blockOffsetsArr);
+        BucketCounts.SetData(bucketCountsArr);
     }
 
     void PrintCellCounts()
@@ -380,7 +422,7 @@ public class CellBoids : MonoBehaviour
         BucketOffsets.GetData(offs);
         BucketCounts.GetData(counts);
         BucketCounters.GetData(counters);
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < offs.Length; i++)
         {
             if (offs[i] != 0) log += $"Offset[{i}] not cleared! Value = {offs[i]} \n";
             if (counts[i] != 0) log += $"Counts[{i}] not cleared! Value = {counts[i]}\n";
@@ -399,6 +441,8 @@ public class CellBoids : MonoBehaviour
         BucketCounts?.Release();
         BucketOffsets?.Release();
         BucketCounters?.Release();
+        BlockCounts?.Release();
+        BlockOffsets?.Release();
 
     }
 
