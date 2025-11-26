@@ -22,9 +22,9 @@ struct BoidCell
     uint cellIndex;
 };
 
-#define RADIX_BITS 4
-#define RADIX_BUCKETS (1 << RADIX_BITS) // = 16
-#define RADIX_MASK (RADIX_BUCKETS - 1) // =15
+#define RADIX_BITS 3
+#define RADIX_BUCKETS (1 << RADIX_BITS) // = 8
+#define RADIX_MASK (RADIX_BUCKETS - 1) // = 7
 
 
 RWStructuredBuffer<uint> CellStart;
@@ -35,7 +35,7 @@ RWStructuredBuffer<Boid> Boids;
 RWStructuredBuffer<BoidCell> BoidCells;
 RWStructuredBuffer<BoidCell> BoidCellsTemp;
 
-RWStructuredBuffer<uint> BucketCounts;   // 16 counters
+RWStructuredBuffer<uint> BucketCounts;   // 8 counters
 RWStructuredBuffer<uint> BucketCounters; //atomic counters for scatter
 RWStructuredBuffer<uint> BucketOffsets;  // prefix-summed offsets
 RWStructuredBuffer<uint> BlockCounts;
@@ -48,6 +48,7 @@ groupshared uint localCounts2[RADIX_BUCKETS];
 uint _Shift;
 
 uint _NumBoids;
+uint _NumGroups;
 uint _NumCells;
 uint _NullCell;
 float _CellSize;
@@ -89,6 +90,8 @@ void RadixClear (uint id : SV_DispatchThreadID)
     BucketCounts[id] = 0;
     BucketCounters[id] = 0;
     BucketOffsets[id] = 0;
+    BlockCounts[id] = 0;
+    BlockOffsets[id] = 0;
 }
 
 
@@ -132,13 +135,19 @@ void RadixBlockHistogram(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3
 [numthreads(1,1,1)]
 void RadixPrefixSum(uint id : SV_DispatchThreadID)
 {
+    uint globalOffset = 0;
 
-    uint sum = 0;
-    for(uint i = 0; i < RADIX_BUCKETS; i++)
+    for (uint group = 0; group < _NumGroups; ++group)
     {
-        uint c = BucketCounts[i];
-        BucketOffsets[i] = sum;
-        sum+= c;
+        uint base = group * RADIX_BUCKETS;
+
+        for (uint digit = 0; digit < RADIX_BUCKETS; ++digit)
+        {
+            uint count = BlockCounts[base + digit];
+
+            BlockOffsets[base + digit] = globalOffset;
+            globalOffset += count;
+        }
     }
 }
 
