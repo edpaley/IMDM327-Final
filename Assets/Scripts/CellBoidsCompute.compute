@@ -165,31 +165,46 @@ void RadixPrefixSum(uint id : SV_DispatchThreadID)
 //     BoidCellsTemp[finalindex] = bc;
 // }
 
+groupshared uint gs_Digits[256];
+
 [numthreads(256,1,1)]
 void RadixScatterStable(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3 dispatchId : SV_DispatchThreadID)
 {
     uint groupIndex = g.x;
     uint globalId = dispatchId.x;
 
-    // initialize shared counters
-    for (uint i = id; i < RADIX_BUCKETS; i += 256)
-        localCounts2[i] = 0;
-    GroupMemoryBarrierWithGroupSync();
-
+    // 1. Calculate and store the digit for this thread
+    uint digit = 0xFFFFFFFF; // Sentinel
     if (globalId < _NumBoids)
     {
         BoidCell bc = BoidCells[globalId];
-        uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
+        digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
+    }
+    
+    // Store in shared memory so other threads can read it
+    gs_Digits[id] = digit;
+    GroupMemoryBarrierWithGroupSync();
 
-        // deterministic per-group rank: atomicAdd on group shared memory is deterministic in-group
-        uint localRank;
-        InterlockedAdd(localCounts2[digit], 1, localRank);
+    // 2. Calculate Rank Stabilly
+    // We cannot use InterlockedAdd. We must count how many threads 
+    // *before* us (lower index) have the same digit.
+    if (globalId < _NumBoids)
+    {
+        uint localRank = 0;
+        // Naive stable scan: Loop through all predecessors.
+        // Since group size is small (256), this is acceptable and robust.
+        for (uint i = 0; i < id; ++i)
+        {
+            if (gs_Digits[i] == digit)
+                localRank++;
+        }
 
-        // compute final index = BlockOffsets[groupIndex*RADIX_BUCKETS + digit] + localRank
+        // 3. Write to destination
+        // BlockOffsets tells us where this GROUP starts writing for this DIGIT
         uint baseIndex = BlockOffsets[groupIndex * RADIX_BUCKETS + digit];
         uint finalIndex = baseIndex + localRank;
 
-        BoidCellsTemp[finalIndex] = bc;
+        BoidCellsTemp[finalIndex] = BoidCells[globalId];
     }
 }
 

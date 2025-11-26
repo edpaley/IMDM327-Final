@@ -6,7 +6,9 @@ public class CellBoids : MonoBehaviour
 {
     [SerializeField] int NumBoids = 100;
     [SerializeField][Range(0.01f, .5f)] float BoidRange;
+
     [SerializeField] ComputeShader CellBoidsCompute;
+    [SerializeField] private bool debugRadix = false;
 
     private float WorldXY = 1f, WorldXYRange = 0.5f;
     private float CellSize = 1f / 8f;
@@ -24,6 +26,8 @@ public class CellBoids : MonoBehaviour
     private ComputeBuffer BlockCounts;
     private ComputeBuffer BlockOffsets;
     private int radix = 1 << 3;
+    uint[] zeroArray;
+    uint[] zeroBlockArray;
 
     private const uint NullCell = 0xFFFFFFFF;
 
@@ -108,13 +112,7 @@ public class CellBoids : MonoBehaviour
         {
             count[(int)(boids[i].pos.x / CellSize), (int)(boids[i].pos.y / CellSize)]++;
         }
-        // for (int i = 0; i < 8; i++)
-        // {
-        //     for (int j = 0; j < 8; j++)
-        //     {
-        //         Debug.Log($"[{i},{j}]: {count[i, j]}");
-        //     }
-        // }
+
 
 
         //BOID CELLS
@@ -147,6 +145,9 @@ public class CellBoids : MonoBehaviour
         CellEnd.SetData(cellEnd);
 
         //RADIX
+
+        zeroArray = new uint[radix];
+        zeroBlockArray = new uint[radix * boidGroup];
 
         BucketCounts = new ComputeBuffer(radix, sizeof(uint));
         BucketOffsets = new ComputeBuffer(radix, sizeof(uint));
@@ -196,7 +197,6 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetInt("_NumCells", NumCells);
         CellBoidsCompute.SetInt("_NullCell", unchecked((int)NullCell));
         CellBoidsCompute.SetInt("_NumGroups", boidGroup);
-        // Debug.Log($"NullCell (uint) = {NullCell}, (int) = {unchecked((int)NullCell)}");
 
     }
 
@@ -205,7 +205,8 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.Dispatch(clearCellKernel, (NumCells + 15) / 16, 1, 1);
         RunRadixSort();
         CellBoidsCompute.Dispatch(buildRangesKernel, boidGroup, 1, 1);
-        ValidateStartEnd();
+        if (debugRadix) ValidateStartEnd();
+        if (debugRadix) VerifyCellRangesFull();
 
     }
 
@@ -219,43 +220,34 @@ public class CellBoids : MonoBehaviour
             CellBoidsCompute.SetInt("_Shift", shift);
 
             RadixClear();
-            ValidateRadixClear();
+            if (debugRadix) ValidateRadixClear();
 
-            // make sure histogram reads the current input buffer
             CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", inBuffer);
             CellBoidsCompute.Dispatch(radixHistKernel, boidGroup, 1, 1);
 
             UpdateBlockOffsetsCounts();
 
-
-            CellBoidsCompute.Dispatch(radixPrefixKernel, 1, 1, 1);
-            ValidatePrefixOffsets();
-
-            // scatter writes into the current output buffer
             CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", inBuffer);
             CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", outBuffer);
             CellBoidsCompute.Dispatch(radixScatterKernel, boidGroup, 1, 1);
 
-            // swap the roles for next pass
             var temp = inBuffer;
             inBuffer = outBuffer;
             outBuffer = temp;
 
-            PrintBoidCells($"post shift {shift}");
+            if (debugRadix) PrintBoidCells($"post shift {shift}");
         }
 
-        // Commit final buffers to fields and bind buildRanges to the final sorted buffer
         BoidCells = inBuffer;
         BoidCellsTemp = outBuffer;
         CellBoidsCompute.SetBuffer(buildRangesKernel, "BoidCells", BoidCells);
 
-        VerifySortedAndUnique();
+        if (debugRadix) VerifySortedAndUnique();
     }
 
     void RadixClear()
     {
-        uint[] zeroArray = new uint[radix];
-        uint[] zeroBlockArray = new uint[radix * boidGroup];
+
         BucketCounts.SetData(zeroArray);
         BucketOffsets.SetData(zeroArray);
         BucketCounters.SetData(zeroArray);
@@ -271,20 +263,23 @@ public class CellBoids : MonoBehaviour
         uint[] blockOffsetsArr = new uint[boidGroup * radix];
         uint[] bucketCountsArr = new uint[radix];
 
-        // For each bucket, scan groups in order
+        uint globalOffset = 0;
+
         for (int bucket = 0; bucket < radix; bucket++)
         {
-            uint off = 0;
-            uint total = 0;
+            uint bucketTotal = 0;
+
             for (int group = 0; group < boidGroup; group++)
             {
                 int idx = group * radix + bucket;
-                blockOffsetsArr[idx] = off;
-                off += blockCountsArr[idx];
 
-                total += blockCountsArr[group * radix + bucket];
+                blockOffsetsArr[idx] = globalOffset;
+
+                uint count = blockCountsArr[idx];
+                globalOffset += count;
+                bucketTotal += count;
             }
-            bucketCountsArr[bucket] = total;
+            bucketCountsArr[bucket] = bucketTotal;
         }
 
         BlockOffsets.SetData(blockOffsetsArr);
@@ -321,22 +316,6 @@ public class CellBoids : MonoBehaviour
         Debug.Log($"TOTAL: {sum}, {lookedAt}");
     }
 
-    void ValidatePrefixOffsets()
-    {
-        uint[] offs = new uint[radix];
-        uint[] counts = new uint[radix];
-        BucketOffsets.GetData(offs);
-        BucketCounts.GetData(counts);
-        uint sum = 0;
-        string log = "";
-        for (int i = 0; i < offs.Length; i++)
-        {
-            log += $"off[{i}]={offs[i]}, cnt[{i}]={counts[i]}\n";
-            if (offs[i] + counts[i] > NumBoids) Debug.LogError($"BAD off+cnt > NumBoids at bucket {i}");
-            sum += counts[i];
-        }
-        Debug.Log($"bucket sum check = {sum} (NumBoids={NumBoids})\n" + log);
-    }
     void ValidateStartEnd()
     {
         uint[] s = new uint[NumCells];
@@ -442,6 +421,103 @@ public class CellBoids : MonoBehaviour
         if (log != "") Debug.LogWarning("Radix was not cleared!\n" + log);
 
     }
+
+    void VerifyCellRangesFull()
+    {
+        uint[] starts = new uint[NumCells];
+        uint[] ends = new uint[NumCells];
+        BoidCell[] sortedBoids = new BoidCell[NumBoids];
+
+        // Read back all necessary buffers
+        CellStart.GetData(starts);
+        CellEnd.GetData(ends);
+        BoidCells.GetData(sortedBoids); // Ensure this is the FINAL sorted buffer
+
+        int errorCount = 0;
+
+        for (int cellId = 0; cellId < NumCells; cellId++)
+        {
+            uint s = starts[cellId];
+            uint e = ends[cellId];
+
+            // 1. Check consistency of Empty Cells
+            if (s == NullCell)
+            {
+                if (e != NullCell)
+                {
+                    Debug.LogError($"Cell {cellId}: Start is NULL but End is {e}");
+                    errorCount++;
+                }
+                continue; // Correctly empty
+            }
+
+            // 2. Check Range Logic
+            if (e == NullCell)
+            {
+                Debug.LogError($"Cell {cellId}: Start is {s} but End is NULL");
+                errorCount++;
+                continue;
+            }
+            if (s > e)
+            {
+                Debug.LogError($"Cell {cellId}: Inverted Range! Start {s} > End {e}");
+                errorCount++;
+                continue;
+            }
+            if (e >= NumBoids)
+            {
+                Debug.LogError($"Cell {cellId}: End {e} is out of bounds (NumBoids={NumBoids})");
+                errorCount++;
+                continue;
+            }
+
+            // 3. Verify Content (The most important part)
+            // Check that the boid at 'Start' actually belongs to this cell
+            if (sortedBoids[s].cellIndex != cellId)
+            {
+                Debug.LogError($"Cell {cellId}: Start index {s} points to Boid with WRONG CellIndex {sortedBoids[s].cellIndex}");
+                errorCount++;
+            }
+
+            // Check that the boid at 'End' actually belongs to this cell
+            if (sortedBoids[e].cellIndex != cellId)
+            {
+                Debug.LogError($"Cell {cellId}: End index {e} points to Boid with WRONG CellIndex {sortedBoids[e].cellIndex}");
+                errorCount++;
+            }
+
+            // 4. Verify Tightness (Boundary Checks)
+            // Ensure we didn't start too late: The boid immediately BEFORE start must NOT be this cell
+            if (s > 0)
+            {
+                if (sortedBoids[s - 1].cellIndex == cellId)
+                {
+                    Debug.LogError($"Cell {cellId}: Range starts too late! Boid at {s - 1} also belongs to this cell.");
+                    errorCount++;
+                }
+            }
+
+            // Ensure we didn't end too early: The boid immediately AFTER end must NOT be this cell
+            if (e < NumBoids - 1)
+            {
+                if (sortedBoids[e + 1].cellIndex == cellId)
+                {
+                    Debug.LogError($"Cell {cellId}: Range ends too early! Boid at {e + 1} also belongs to this cell.");
+                    errorCount++;
+                }
+            }
+        }
+
+        if (errorCount == 0)
+        {
+            Debug.Log("Range Verification Passed: All ranges match sorted data.");
+        }
+        else
+        {
+            Debug.LogError($"Range Verification FAILED with {errorCount} errors.");
+        }
+    }
+
     void OnDestroy()
     {
         Boids?.Release();
