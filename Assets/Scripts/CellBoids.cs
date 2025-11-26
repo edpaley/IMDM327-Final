@@ -60,7 +60,7 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.Dispatch(assignCellKernel, boidGroup, 1, 1);
         SortBoidsByCell();
         //PrintCellCounts();
-        Debug.Log(log);
+        // Debug.Log(log);
     }
 
     void Update()
@@ -190,7 +190,7 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetInt("_CellSeats", CellSeats);
         CellBoidsCompute.SetInt("_NumCells", NumCells);
         CellBoidsCompute.SetInt("_NullCell", unchecked((int)NullCell));
-        Debug.Log($"NullCell (uint) = {NullCell}, (int) = {unchecked((int)NullCell)}");
+        // Debug.Log($"NullCell (uint) = {NullCell}, (int) = {unchecked((int)NullCell)}");
 
     }
 
@@ -205,8 +205,7 @@ public class CellBoids : MonoBehaviour
 
     void RunRadixSort()
     {
-
-        DumpAssignedBoidCells();
+        //PrintBoidCells("pre radix");
 
         int bits = 9; //512 cells
         for (int shift = 0; shift < bits; shift += 4)
@@ -215,17 +214,15 @@ public class CellBoids : MonoBehaviour
 
             CellBoidsCompute.Dispatch(radixClearKernel, 1, 1, 1);
 
-            DebugCheckCleared();
+            ValidateRadixClear();
+
 
             CellBoidsCompute.Dispatch(radixHistKernel, boidGroup, 1, 1);
 
-            DebugPrintBucketCounts();
 
             CellBoidsCompute.Dispatch(radixPrefixKernel, 1, 1, 1);
 
-            DebugCheckOffsets();
-
-
+            ValidatePrefixOffsets();
 
             CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCells", BoidCells);
             CellBoidsCompute.SetBuffer(radixScatterKernel, "BoidCellsTemp", BoidCellsTemp);
@@ -236,11 +233,13 @@ public class CellBoids : MonoBehaviour
             BoidCells = BoidCellsTemp;
             BoidCellsTemp = temp;
 
-            DumpSortedBoidCells();
 
             CellBoidsCompute.SetBuffer(radixHistKernel, "BoidCells", BoidCells);
             CellBoidsCompute.SetBuffer(buildRangesKernel, "BoidCells", BoidCells);
+
+            PrintBoidCells($"post shift {shift}");
         }
+        VerifySortedAndUnique();
     }
 
     void PrintCellCounts()
@@ -273,16 +272,21 @@ public class CellBoids : MonoBehaviour
         Debug.Log($"TOTAL: {sum}, {lookedAt}");
     }
 
-    void DebugPrintBucketCounts()
+    void ValidatePrefixOffsets()
     {
-        uint[] bc = new uint[16];
-        BucketCounts.GetData(bc);
+        uint[] offs = new uint[16];
+        uint[] counts = new uint[16];
+        BucketOffsets.GetData(offs);
+        BucketCounts.GetData(counts);
         uint sum = 0;
-        for (int i = 0; i < bc.Length; i++)
-        { //Debug.Log($"Bucket[{i}]={bc[i]}"); sum += bc[i]; 
+        string log = "";
+        for (int i = 0; i < offs.Length; i++)
+        {
+            log += $"off[{i}]={offs[i]}, cnt[{i}]={counts[i]}\n";
+            if (offs[i] + counts[i] > NumBoids) Debug.LogError($"BAD off+cnt > NumBoids at bucket {i}");
+            sum += counts[i];
         }
-        log += $"Bucket sum = {sum}  (NumBoids = {NumBoids})" + "\n";
-        //Debug.Log($"Bucket sum = {sum}  (NumBoids = {NumBoids})");
+        Debug.Log($"bucket sum check = {sum} (NumBoids={NumBoids})\n" + log);
     }
     void ValidateStartEnd()
     {
@@ -298,59 +302,93 @@ public class CellBoids : MonoBehaviour
         }
     }
 
-    void DebugCheckCleared()
+    void PrintBoidCells(string when = "")
     {
-        uint[] arr = new uint[16];
-        BucketCounts.GetData(arr);
-        for (int i = 0; i < 16; i++) if (arr[i] != 0) Debug.LogError($"BucketCounts not cleared at {i} = {arr[i]}");
-        BucketOffsets.GetData(arr);
-        for (int i = 0; i < 16; i++) if (arr[i] != 0) Debug.LogError($"BucketOffsets not cleared at {i} = {arr[i]}");
-        BucketCounters.GetData(arr);
-        for (int i = 0; i < 16; i++) if (arr[i] != 0) Debug.LogError($"BucketCounters not cleared at {i} = {arr[i]}");
+        string log = $"BoidCells {(when == "" ? "" : "at " + when)}: \n";
+        BoidCell[] bc = new BoidCell[NumBoids];
+        BoidCells.GetData(bc);
+        for (int i = 0; i < bc.Length; i++)
+        {
+            log += $"Boid ({bc[i].boidIndex}), Cell ({bc[i].cellIndex})\n";
+        }
+
+        Debug.Log(log);
     }
 
-    void DebugCheckOffsets()
+    void VerifySortedAndUnique()
     {
-        uint[] offsets = new uint[16];
+        // read full sorted BoidCells (the buffer currently bound as BoidCells in your C# after swaps)
+        var arr = new BoidCell[NumBoids];
+        BoidCells.GetData(arr);
+
+        // 1) Check monotonic non-decreasing cellIndex
+        int badIndex = -1;
+        for (int i = 1; i < arr.Length; i++)
+        {
+            if (arr[i].cellIndex < arr[i - 1].cellIndex)
+            {
+                badIndex = i;
+                break;
+            }
+        }
+
+        if (badIndex >= 0)
+        {
+            string log = "";
+            log += $"Context around error:\n";
+            for (int k = Mathf.Max(0, badIndex - 8); k < Mathf.Min(arr.Length, badIndex + 8); k++)
+                log += $"  pos {k}: boid {arr[k].boidIndex}, cell {arr[k].cellIndex}\n";
+
+            Debug.LogError($"SORT ORDER VIOLATION at pos {badIndex - 1}..{badIndex}: cell[{badIndex - 1}]={arr[badIndex - 1].cellIndex} cell[{badIndex}]={arr[badIndex].cellIndex}\n " + log);
+        }
+        else
+        {
+            Debug.Log("Order check: OK (non-decreasing cellIndex).");
+        }
+
+        // 2) Check uniqueness / coverage of boidIndex 0..NumBoids-1
+        var seen = new int[NumBoids];
+        for (int i = 0; i < arr.Length; i++)
+        {
+            uint b = arr[i].boidIndex;
+            if (b >= NumBoids) Debug.LogError($"BAD boidIndex value {b} at sorted pos {i}");
+            else seen[b]++;
+        }
+
+        int missing = 0, dup = 0;
+        for (int i = 0; i < NumBoids; i++)
+        {
+            if (seen[i] == 0) missing++;
+            else if (seen[i] > 1) dup++;
+        }
+        Debug.Log($"Uniqueness: missing={missing}, duplicates={dup}");
+        if (missing > 0 || dup > 0)
+        {
+            // print some examples
+            for (int i = 0; i < Mathf.Min(NumBoids, 200); i++)
+                if (seen[i] == 0) Debug.LogError($"Missing boid {i}");
+                else if (seen[i] > 1) Debug.LogError($"Duplicated boid {i} count={seen[i]}");
+        }
+    }
+
+    void ValidateRadixClear()
+    {
+        string log = "";
+        uint[] offs = new uint[16];
         uint[] counts = new uint[16];
-        BucketOffsets.GetData(offsets);
+        uint[] counters = new uint[16];
+        BucketOffsets.GetData(offs);
         BucketCounts.GetData(counts);
-        for (int i = 0; i < 16; i++)
+        BucketCounters.GetData(counters);
+        for (int i = 0; i < 8; i++)
         {
-            uint start = offsets[i];
-            uint cnt = counts[i];
-            log += $"off[{i}] = {start}, cnt[{i}] = {cnt}" + "\n";
-            //Debug.Log($"off[{i}] = {start}, cnt[{i}] = {cnt}");
-            if (start + cnt > (uint)NumBoids) Debug.LogError($"bucket {i} overflow: start+cnt = {start + cnt} > NumBoids");
+            if (offs[i] != 0) log += $"Offset[{i}] not cleared! Value = {offs[i]} \n";
+            if (counts[i] != 0) log += $"Counts[{i}] not cleared! Value = {counts[i]}\n";
+            if (counters[i] != 0) log += $"counters[{i}] not cleared! Value = {counters[i]}\n";
         }
-
+        if (log != "") Debug.LogWarning("Radix was not cleared!\n" + log);
 
     }
-
-    void DumpAssignedBoidCells(int N = 128)
-    {
-        var arr = new BoidCell[Mathf.Min(NumBoids, N)];
-        // ensure you're reading buffer bound to assign kernel (BoidCells)
-        BoidCells.GetData(arr, 0, 0, arr.Length);
-        for (int i = 0; i < arr.Length; i++)
-        {
-            if (arr[i].cellIndex >= NumCells) Debug.LogError($"AssignCells BAD: boid {arr[i].boidIndex} cell {arr[i].cellIndex}");
-        }
-    }
-
-
-    void DumpSortedBoidCells(int N = 64)
-    {
-        var arr = new BoidCell[Mathf.Min(NumBoids, N)];
-        BoidCells.GetData(arr, 0, 0, arr.Length);
-        for (int i = 0; i < arr.Length; i++)
-        {
-            log += $"sorted[{i}] boid {arr[i].boidIndex}, cell {arr[i].cellIndex}" + "\n";
-            Debug.Log($"sorted[{i}] boid {arr[i].boidIndex}, cell {arr[i].cellIndex}");
-            if (arr[i].cellIndex >= NumCells) Debug.LogError($"BAD cellIndex at sorted[{i}] = {arr[i].cellIndex}");
-        }
-    }
-
     void OnDestroy()
     {
         Boids?.Release();

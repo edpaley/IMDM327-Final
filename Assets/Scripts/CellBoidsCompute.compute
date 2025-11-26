@@ -1,8 +1,7 @@
-
 #pragma kernel UpdateBoids
 #pragma kernel AssignCells
 #pragma kernel ClearCells
-#pragma kernel RadSortCells
+// #pragma kernel RadSortCells
 #pragma kernel RadixClear
 #pragma kernel RadixHistogram
 #pragma kernel RadixPrefixSum
@@ -23,7 +22,7 @@ struct BoidCell
 
 #define RADIX_BITS 4
 #define RADIX_BUCKETS (1 << RADIX_BITS) // = 16
-#define RADIX_MASK (RADIX_BUCKETS - 1)
+#define RADIX_MASK (RADIX_BUCKETS - 1) // =15
 
 
 RWStructuredBuffer<uint> CellStart;
@@ -92,8 +91,7 @@ void RadixHistogram(uint id : SV_DispatchThreadID)
     if(id >= _NumBoids) return;
 
     uint cell = BoidCells[id].cellIndex;
-    uint activeMask = (_Shift >= 8) ? 0x1 : RADIX_MASK;
-    uint digit = (cell >> _Shift) & activeMask;
+    uint digit = (cell >> _Shift) & RADIX_MASK;
 
     InterlockedAdd(BucketCounts[digit], 1); 
 }
@@ -116,8 +114,7 @@ void RadixScatter(uint id : SV_DispatchThreadID)
 {
     if (id >= _NumBoids) return;
     BoidCell bc = BoidCells[id];
-    uint activeMask = (_Shift >= 8) ? 0x1 : RADIX_MASK;
-    uint digit = (bc.cellIndex >> _Shift) & activeMask;
+    uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
 
     uint localOffset;
     InterlockedAdd(BucketCounters[digit], 1, localOffset);
