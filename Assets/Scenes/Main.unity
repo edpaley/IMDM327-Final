@@ -285,12 +285,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dd7af1eda97e72b4e8677e4d65423ef3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  NumBoids: 64000
-  BoidRange: 0.01
+  NumBoids: 10000
   CellBoidsCompute: {fileID: 7200000, guid: 472e805eb3259654c9a11e886c38edda, type: 3}
   BoidMaterial: {fileID: 2100000, guid: 7694770204a3c2f4ba2aa555348c1823, type: 2}
   boidParams:
-    present: 1
+    present: 0
     NeighborRadius: 0.125
     MinSpeed: 0.01
     MaxSpeed: 0.1

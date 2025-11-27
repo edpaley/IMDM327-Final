@@ -6,7 +6,6 @@ using UnityEngine.Rendering;
 public class CellBoids : MonoBehaviour
 {
     [SerializeField] int NumBoids = 100;
-    [SerializeField][Range(0.01f, .5f)] float BoidRange;
 
     [SerializeField] ComputeShader CellBoidsCompute;
     [SerializeField] Material BoidMaterial;
@@ -15,7 +14,7 @@ public class CellBoids : MonoBehaviour
     private bool paramsChanged;
     [SerializeField] private bool debugRadix = false;
 
-    private float WorldXY = 1f, WorldXYRange = 0.5f;
+    private float WorldXY = 1f;
     private float CellSize = 1f / 8f;
     private int CellSeats = 8, NumCells = 512;
 
