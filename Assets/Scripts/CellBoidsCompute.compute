@@ -42,7 +42,7 @@ RWStructuredBuffer<uint> BlockCounts;
 RWStructuredBuffer<uint> BlockOffsets;
 
 groupshared uint localCounts[RADIX_BUCKETS];
-groupshared uint localCounts2[RADIX_BUCKETS];
+groupshared uint gs_Digits[256];
 
 
 uint _Shift;
@@ -54,6 +54,44 @@ uint _NullCell;
 float _CellSize;
 float _CellSeats;
 
+float _NeighborRadius;
+float _SeparationDistance;
+float _SeparationWeight;
+float _AlignmentWeight;
+float _CohesionWeight;
+float _MaxSpeed; 
+float _MinSpeed;
+
+float _DeltaTime;
+
+
+uint2 CellCord(float2 pos)
+{
+    int2 cellCord= int2(floor(pos / _CellSize));
+
+    cellCord.x = clamp(cellCord.x, 0, _CellSeats - 1);
+    cellCord.y = clamp(cellCord.y, 0, _CellSeats - 1);
+
+    return (uint) cellCord;
+}
+
+uint FlattenCord(uint2 cord)
+{
+    return (cord.x) + (cord.y * _CellSeats);
+}
+
+uint2 UnflattedCord(uint flatCord)
+{
+    uint2 cord;
+    cord.x = flatCord % _CellSeats;
+    cord.y = (flatCord / _CellSeats) % _CellSeats;
+    return cord;
+}
+
+bool IsValidCell(int value)
+{
+    return value >= 0 && value < _CellSeats;
+}
 
 
 [numthreads(256, 1, 1)]
@@ -63,16 +101,14 @@ void AssignCells(uint id : SV_DispatchThreadID)
 
     Boid b = Boids[id];
 
-    int2 cellCord= int2(floor(b.pos / _CellSize));
+    uint2 cellCord= CellCord(b.pos);
 
-    cellCord.x = clamp(cellCord.x, 0, _CellSeats - 1);
-    cellCord.y = clamp(cellCord.y, 0, _CellSeats - 1);
-
-    uint flattenedCord = (cellCord.x) + (cellCord.y * _CellSeats);
+    uint flattenedCord = FlattenCord(cellCord);
 
     BoidCells[id].boidIndex = id;
     BoidCells[id].cellIndex = flattenedCord;
 }
+
 
 [numthreads(16, 1, 1)]
 void ClearCells(uint id : SV_DispatchThreadID)
@@ -93,18 +129,6 @@ void RadixClear (uint id : SV_DispatchThreadID)
     BlockCounts[id] = 0;
     BlockOffsets[id] = 0;
 }
-
-
-// [numthreads(256,1,1)]
-// void RadixHistogram(uint id : SV_DispatchThreadID)
-// {
-//     if(id >= _NumBoids) return;
-
-//     uint cell = BoidCells[id].cellIndex;
-//     uint digit = (cell >> _Shift) & RADIX_MASK;
-
-//     InterlockedAdd(BucketCounts[digit], 1); 
-// }
 
 [numthreads(256,1,1)]
 void RadixBlockHistogram(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3 dispatchId : SV_DispatchThreadID)
@@ -151,21 +175,6 @@ void RadixPrefixSum(uint id : SV_DispatchThreadID)
     }
 }
 
-// [numthreads(256,1,1)]
-// void RadixScatter(uint id : SV_DispatchThreadID)
-// {
-//     if (id >= _NumBoids) return;
-//     BoidCell bc = BoidCells[id];
-//     uint digit = (bc.cellIndex >> _Shift) & RADIX_MASK;
-
-//     uint localOffset;
-//     InterlockedAdd(BucketCounters[digit], 1, localOffset);
-    
-//     uint finalindex = BucketOffsets[digit] + localOffset;
-//     BoidCellsTemp[finalindex] = bc;
-// }
-
-groupshared uint gs_Digits[256];
 
 [numthreads(256,1,1)]
 void RadixScatterStable(uint id : SV_GroupThreadID, uint3 g : SV_GroupID, uint3 dispatchId : SV_DispatchThreadID)
@@ -223,6 +232,91 @@ void BuildCellRanges(uint id : SV_DispatchThreadID)
 }
 
 [numthreads(256,1,1)]
-void UpdateBoids (uint3 id : SV_DispatchThreadID)
+void UpdateBoids (uint id : SV_DispatchThreadID)
 {
+    if(id >= _NumBoids) return;
+    Boid b = Boids[id];
+    uint2 cell = CellCord(b.pos);
+
+    float2 cohesion = 0;
+    float2 alignment = 0;
+    float2 separation = 0;
+    int neighborCount = 0;
+
+    for(int i = -1; i <= 1; i++)
+    {
+        if(!IsValidCell((int) cell.x + i)) continue;
+        for(int j = -1; j <= 1; j++)
+        {
+            if(!IsValidCell((int) cell.y + j)) continue;
+
+            uint curCell = FlattenCord(cell + int2(i,j));
+
+            uint start = CellStart[curCell];
+            uint end = CellEnd[curCell];
+
+            if(start == _NullCell || end == _NullCell) continue;
+
+            for(uint cellIndex = start; cellIndex <= end; cellIndex++)
+            {
+                uint boidIndex = BoidCells[cellIndex].boidIndex;
+
+                if(boidIndex == id) continue;
+
+                Boid bo = Boids[boidIndex];
+
+                float2 offset = bo.pos - b.pos;
+                float2 dir = normalize(offset);
+                float distSq = dot(offset, offset);
+
+                if(distSq > 0.00001 && distSq <= _NeighborRadius * _NeighborRadius)
+                {
+                    float distance = sqrt(distSq);
+                    neighborCount++;
+
+                    cohesion += bo.pos;
+                    alignment += bo.vel;
+
+                    if(distance < _SeparationDistance) separation -= dir / (distance + 0.0001);
+                }
+
+            }
+
+        }
+
+    }
+
+    if(neighborCount > 0)
+    {
+        float2 centerOfMass = cohesion / neighborCount;
+        cohesion = normalize(centerOfMass - b.pos) * _CohesionWeight;
+
+        float2 avgVel = alignment / neighborCount;
+        alignment = normalize(avgVel) * _AlignmentWeight;
+
+        separation *= _SeparationWeight;
+    }
+
+    float2 acceleration = cohesion + alignment + separation;
+
+    b.vel += acceleration * _DeltaTime;
+
+    float speed = length(b.vel);
+    if(speed > _MaxSpeed)
+    {
+        b.vel = normalize(b.vel) * _MaxSpeed;
+    }
+    else if (speed < _MinSpeed)
+    {
+        b.vel = normalize(b.vel) * _MinSpeed;
+    }
+
+    b.pos += b.vel * _DeltaTime;
+
+    if(b.pos.x < 0 || b.pos.x > 1) b.vel.x *= -1;
+    if(b.pos.y < 0 || b.pos.y > 1) b.vel.y *= -1;
+
+    b.pos = clamp(b.pos, 0, 1);
+
+    Boids[id] = b;
 }

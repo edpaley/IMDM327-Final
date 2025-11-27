@@ -1,4 +1,5 @@
 using Unity.VisualScripting;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -8,6 +9,10 @@ public class CellBoids : MonoBehaviour
     [SerializeField][Range(0.01f, .5f)] float BoidRange;
 
     [SerializeField] ComputeShader CellBoidsCompute;
+    [SerializeField] Material BoidMaterial;
+    [SerializeField] BoidParams boidParams = BoidParamsPresents.defaultParams;
+    private BoidParams lastboidParams;
+    private bool paramsChanged;
     [SerializeField] private bool debugRadix = false;
 
     private float WorldXY = 1f, WorldXYRange = 0.5f;
@@ -39,6 +44,11 @@ public class CellBoids : MonoBehaviour
     private string log;
     uint[,] count;
 
+
+    [SerializeField] float boidSize = 1f;
+    [SerializeField] Color slowColor, fastColor;
+    private Mesh boidMesh;
+
     struct Boid
     {
         public Vector2 pos;
@@ -59,24 +69,41 @@ public class CellBoids : MonoBehaviour
             return;
         }
 
+        boidMesh = CreateQuad();
+
+        BoidMaterial.SetBuffer("_Boids", Boids);
+        BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
+        BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
 
         IntializeKernelIndicies();
         InitializeBuffers();
         SetNonUpdatingParams();
-
-        CellBoidsCompute.Dispatch(assignCellKernel, boidGroup, 1, 1);
-        SortBoidsByCell();
-        //PrintCellCounts();
-        // Debug.Log(log);
+        SetBoidParams();
     }
 
     void Update()
     {
-        // CellBoidsCompute.Dispatch(assignCellKernel, boidGroup, 1, 1);
-        // SortBoidsByCell();
-        // PrintCellCounts();
-
+        SortBoidsByCell();
+        BoidsUpdate();
     }
+
+    void OnValidate()
+    {
+        if (!boidParams.Equals(lastboidParams))
+        {
+            paramsChanged = true;
+            if (boidParams.present == lastboidParams.present)
+            {
+                boidParams.present = BoidParamsPresents.Present.Custom;
+            }
+            else if (boidParams.present != BoidParamsPresents.Present.Custom)
+            {
+                boidParams = BoidParamsPresents.GetPresent(boidParams.present);
+            }
+            lastboidParams = boidParams;
+        }
+    }
+
 
     private void IntializeKernelIndicies()
     {
@@ -186,6 +213,11 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetBuffer(buildRangesKernel, "CellStart", CellStart);
         CellBoidsCompute.SetBuffer(buildRangesKernel, "CellEnd", CellEnd);
 
+        CellBoidsCompute.SetBuffer(updateKernel, "Boids", Boids);
+        CellBoidsCompute.SetBuffer(updateKernel, "BoidCells", BoidCells);
+        CellBoidsCompute.SetBuffer(updateKernel, "CellStart", CellStart);
+        CellBoidsCompute.SetBuffer(updateKernel, "CellEnd", CellEnd);
+
 
     }
 
@@ -197,12 +229,34 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetInt("_NumCells", NumCells);
         CellBoidsCompute.SetInt("_NullCell", unchecked((int)NullCell));
         CellBoidsCompute.SetInt("_NumGroups", boidGroup);
+    }
 
+    private void SetBoidParams()
+    {
+        paramsChanged = false;
+        CellBoidsCompute.SetFloat("_NeighborRadius", boidParams.NeighborRadius);
+        CellBoidsCompute.SetFloat("_SeparationDistance", boidParams.SeperationDistance);
+        CellBoidsCompute.SetFloat("_SeparationWeight", boidParams.SeperationWeight);
+        CellBoidsCompute.SetFloat("_AlignmentWeight", boidParams.AlignmentWeight);
+        CellBoidsCompute.SetFloat("_CohesionWeight", boidParams.CohesionWeight);
+        CellBoidsCompute.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
+        CellBoidsCompute.SetFloat("_MinSpeed", boidParams.MinSpeed);
+    }
+
+    void BoidsUpdate()
+    {
+        if (paramsChanged) SetBoidParams();
+        CellBoidsCompute.SetBuffer(updateKernel, "BoidCells", BoidCells);
+        CellBoidsCompute.SetBuffer(updateKernel, "CellStart", CellStart); //may not be necessary
+        CellBoidsCompute.SetBuffer(updateKernel, "CellEnd", CellEnd); //may not be necessary
+        CellBoidsCompute.SetFloat("_DeltaTime", Time.deltaTime);
+        CellBoidsCompute.Dispatch(updateKernel, boidGroup, 1, 1);
     }
 
     void SortBoidsByCell()
     {
-        CellBoidsCompute.Dispatch(clearCellKernel, (NumCells + 15) / 16, 1, 1);
+        CellBoidsCompute.Dispatch(assignCellKernel, boidGroup, 1, 1);
+        CellBoidsCompute.Dispatch(clearCellKernel, (NumCells + cellThreads - 1) / cellThreads, 1, 1);
         RunRadixSort();
         CellBoidsCompute.Dispatch(buildRangesKernel, boidGroup, 1, 1);
         if (debugRadix) ValidateStartEnd();
@@ -516,6 +570,63 @@ public class CellBoids : MonoBehaviour
         {
             Debug.LogError($"Range Verification FAILED with {errorCount} errors.");
         }
+    }
+
+    void OnRenderObject()
+    {
+        if (BoidMaterial == null || Boids == null || boidMesh == null || Camera.current == null)
+        {
+            return;
+        }
+
+
+        if (Camera.current.cameraType != CameraType.Game && Camera.current.cameraType != CameraType.SceneView)
+        {
+            return;
+        }
+
+        BoidMaterial.SetBuffer("_Boids", Boids);
+        BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
+        BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
+
+        BoidMaterial.SetColor("_Color1", slowColor);
+        BoidMaterial.SetColor("_Color2", fastColor);
+
+        Bounds bounds = new Bounds(Vector3.zero, Vector3.one * 20f);
+
+        BoidMaterial.SetPass(0);
+
+        Graphics.DrawMeshInstancedProcedural(
+            boidMesh,
+            0,
+            BoidMaterial,
+            bounds,
+            NumBoids
+        );
+    }
+
+    private Mesh CreateQuad()
+    {
+        Mesh mesh = new Mesh();
+        Vector3[] vertices = new Vector3[]
+        {
+            new Vector3(-0.01f * boidSize, -0.01f * boidSize, 0),
+            new Vector3(0.01f * boidSize, -0.01f * boidSize, 0),
+            new Vector3(-0.01f * boidSize, 0.01f * boidSize, 0),
+            new Vector3(0.01f * boidSize, 0.01f * boidSize, 0)
+        };
+
+        int[] tris = new int[]
+        {
+            0, 2, 1,
+            2, 3, 1
+        };
+
+        mesh.vertices = vertices;
+        mesh.triangles = tris;
+        mesh.RecalculateBounds();
+
+        return mesh;
     }
 
     void OnDestroy()
