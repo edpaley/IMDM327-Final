@@ -10,7 +10,6 @@ public class CellBoids : MonoBehaviour
 
     [SerializeField] private ComputeShader CellBoidsCompute;
     [SerializeField] private VisualEffect vfxGraph;
-    // [SerializeField] private Material BoidMaterial;
     [SerializeField] private BoidParams boidParams = BoidParamsPresents.defaultParams;
 
     private BoidParams lastboidParams;
@@ -52,11 +51,6 @@ public class CellBoids : MonoBehaviour
     private string log;
     uint[,] count;
 
-
-    [SerializeField] float boidSize = 1f;
-    [SerializeField] Color slowColor, fastColor;
-    private Mesh boidMesh;
-
     struct Boid
     {
         public Vector3 pos;
@@ -76,12 +70,6 @@ public class CellBoids : MonoBehaviour
             Debug.LogWarning("CellBoidsCompute not set");
             return;
         }
-
-        // boidMesh = CreateQuad();
-
-        // BoidMaterial.SetBuffer("_Boids", Boids);
-        // BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
-        // BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
 
         IntializeKernelIndicies();
         InitializeBuffers();
@@ -609,63 +597,6 @@ public class CellBoids : MonoBehaviour
         }
     }
 
-    // void OnRenderObject()
-    // {
-    //     if (BoidMaterial == null || Boids == null || boidMesh == null || Camera.current == null)
-    //     {
-    //         return;
-    //     }
-
-
-    //     if (Camera.current.cameraType != CameraType.Game && Camera.current.cameraType != CameraType.SceneView)
-    //     {
-    //         return;
-    //     }
-
-    //     BoidMaterial.SetBuffer("_Boids", Boids);
-    //     BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
-    //     BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
-
-    //     BoidMaterial.SetColor("_Color1", slowColor);
-    //     BoidMaterial.SetColor("_Color2", fastColor);
-
-    //     Bounds bounds = new Bounds(Camera.main.transform.position, Vector3.one * 1000000f);
-
-    //     BoidMaterial.SetPass(0);
-
-    //     Graphics.DrawMeshInstancedProcedural(
-    //         boidMesh,
-    //         0,
-    //         BoidMaterial,
-    //         bounds,
-    //         NumBoids
-    //     );
-
-    // }
-
-    // private Mesh CreateQuad()
-    // {
-    //     Mesh mesh = new Mesh();
-    //     Vector3[] vertices = new Vector3[]
-    //     {
-    //         new Vector3(-0.01f * boidSize, -0.01f * boidSize, 0),
-    //         new Vector3(0.01f * boidSize, -0.01f * boidSize, 0),
-    //         new Vector3(-0.01f * boidSize, 0.01f * boidSize, 0),
-    //         new Vector3(0.01f * boidSize, 0.01f * boidSize, 0)
-    //     };
-
-    //     int[] tris = new int[]
-    //     {
-    //         0, 2, 1,
-    //         2, 3, 1
-    //     };
-
-    //     mesh.vertices = vertices;
-    //     mesh.triangles = tris;
-    //     mesh.RecalculateBounds();
-
-    //     return mesh;
-    // }
 
     void OnDestroy()
     {
