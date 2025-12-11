@@ -12,10 +12,11 @@
 
 struct Boid
 {
-    float2 pos;
-    float2 vel;
+    float3 pos;
+    float3 vel;
 };
 
+//update below
 struct BoidCell
 {
     uint boidIndex;
@@ -65,26 +66,34 @@ float _MinSpeed;
 float _DeltaTime;
 
 
-uint2 CellCord(float2 pos)
+uint3 CellCord(float3 pos)
 {
-    int2 cellCord= int2(floor(pos / _CellSize));
+    int3 cellCord= int3(floor(pos / _CellSize));
 
     cellCord.x = clamp(cellCord.x, 0, _CellSeats - 1);
     cellCord.y = clamp(cellCord.y, 0, _CellSeats - 1);
+    cellCord.z = clamp(cellCord.z, 0, _CellSeats - 1);
 
-    return (uint) cellCord;
+    return (uint3) cellCord;
 }
 
-uint FlattenCord(uint2 cord)
+uint FlattenCord(uint3 cord)
 {
-    return (cord.x) + (cord.y * _CellSeats);
+    return (cord.x) + (cord.y * _CellSeats) + (cord.z * _CellSeats * _CellSeats);
 }
 
-uint2 UnflattedCord(uint flatCord)
+uint3 UnflattedCord(uint flatCord)
 {
-    uint2 cord;
-    cord.x = flatCord % _CellSeats;
-    cord.y = (flatCord / _CellSeats) % _CellSeats;
+    uint3 cord;
+    uint area = _CellSeats * _CellSeats;
+
+    cord.z = flatCord / area;
+
+    uint remainder = flatCord % area;
+
+    cord.x = remainder % _CellSeats;
+    cord.y = remainder / _CellSeats;
+
     return cord;
 }
 
@@ -101,7 +110,7 @@ void AssignCells(uint id : SV_DispatchThreadID)
 
     Boid b = Boids[id];
 
-    uint2 cellCord= CellCord(b.pos);
+    uint3 cellCord= CellCord(b.pos);
 
     uint flattenedCord = FlattenCord(cellCord);
 
@@ -236,11 +245,11 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 {
     if(id >= _NumBoids) return;
     Boid b = Boids[id];
-    uint2 cell = CellCord(b.pos);
+    uint3 cell = CellCord(b.pos);
 
-    float2 cohesion = 0;
-    float2 alignment = 0;
-    float2 separation = 0;
+    float3 cohesion = 0;
+    float3 alignment = 0;
+    float3 separation = 0;
     int neighborCount = 0;
 
     for(int i = -1; i <= 1; i++)
@@ -249,38 +258,47 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
         for(int j = -1; j <= 1; j++)
         {
             if(!IsValidCell((int) cell.y + j)) continue;
-
-            uint curCell = FlattenCord(cell + int2(i,j));
-
-            uint start = CellStart[curCell];
-            uint end = CellEnd[curCell];
-
-            if(start == _NullCell || end == _NullCell) continue;
-
-            for(uint cellIndex = start; cellIndex <= end; cellIndex++)
+            for(int k = -1; k <= 1; k++)
             {
-                uint boidIndex = BoidCells[cellIndex].boidIndex;
+                if(!IsValidCell((int) cell.z + k)) continue;
 
-                if(boidIndex == id) continue;
+                uint curCell = FlattenCord(cell + int3(i,j,k));
+            
+                uint start = CellStart[curCell];
+                uint end = CellEnd[curCell];
 
-                Boid bo = Boids[boidIndex];
+                if(start == _NullCell || end == _NullCell) continue;
 
-                float2 offset = bo.pos - b.pos;
-                float2 dir = normalize(offset);
-                float distSq = dot(offset, offset);
-
-                if(distSq > 0.00001 && distSq <= _NeighborRadius * _NeighborRadius)
+                for(uint cellIndex = start; cellIndex <= end; cellIndex++)
                 {
-                    float distance = sqrt(distSq);
-                    neighborCount++;
+                    uint boidIndex = BoidCells[cellIndex].boidIndex;
 
-                    cohesion += bo.pos;
-                    alignment += bo.vel;
+                    if(boidIndex == id) continue;
 
-                    if(distance < _SeparationDistance) separation -= dir / (distance + 0.0001);
+                    Boid bo = Boids[boidIndex];
+
+                    float3 offset = bo.pos - b.pos;
+                    float distSq = dot(offset, offset);
+
+                    if(distSq > 0.00001 && distSq <= _NeighborRadius * _NeighborRadius)
+                    {
+                        float distance = sqrt(distSq);
+                        neighborCount++;
+
+                        cohesion += bo.pos;
+                        alignment += bo.vel;
+
+                        
+                        if(distance < _SeparationDistance)
+                        {
+                            float3 dir = normalize(offset);
+                            separation -= dir / (distance + 0.0001);
+                        }
+                    }
+
                 }
-
             }
+                
 
         }
 
@@ -288,16 +306,16 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 
     if(neighborCount > 0)
     {
-        float2 centerOfMass = cohesion / neighborCount;
+        float3 centerOfMass = cohesion / neighborCount;
         cohesion = normalize(centerOfMass - b.pos) * _CohesionWeight;
 
-        float2 avgVel = alignment / neighborCount;
+        float3 avgVel = alignment / neighborCount;
         alignment = normalize(avgVel) * _AlignmentWeight;
 
         separation *= _SeparationWeight;
     }
 
-    float2 acceleration = cohesion + alignment + separation;
+    float3 acceleration = cohesion + alignment + separation;
 
     b.vel += acceleration * _DeltaTime;
 
@@ -313,10 +331,9 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 
     b.pos += b.vel * _DeltaTime;
 
-    if(b.pos.x < 0 || b.pos.x > 1) b.vel.x *= -1;
-    if(b.pos.y < 0 || b.pos.y > 1) b.vel.y *= -1;
-
-    b.pos = clamp(b.pos, 0, 1);
+    if(b.pos.x < 0 || b.pos.x >= 1) b.vel.x *= -1;
+    if(b.pos.y < 0 || b.pos.y >= 1) b.vel.y *= -1;
+    if(b.pos.z < 0 || b.pos.z >= 1) b.vel.z *= -1; 
 
     Boids[id] = b;
 }

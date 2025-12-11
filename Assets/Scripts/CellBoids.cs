@@ -50,8 +50,8 @@ public class CellBoids : MonoBehaviour
 
     struct Boid
     {
-        public Vector2 pos;
-        public Vector2 vel;
+        public Vector3 pos;
+        public Vector3 vel;
     }
 
     struct BoidCell
@@ -122,12 +122,12 @@ public class CellBoids : MonoBehaviour
         //BOIDS
         boidGroup = (NumBoids + boidThreads - 1) / boidThreads;
 
-        Boids = new ComputeBuffer(NumBoids, sizeof(float) * 4);
+        Boids = new ComputeBuffer(NumBoids, sizeof(float) * 6);
 
         Boid[] boids = new Boid[NumBoids];
         for (int i = 0; i < NumBoids; i++)
         {
-            boids[i].pos = new Vector2(Random.Range(0, WorldXY), Random.Range(0, WorldXY));
+            boids[i].pos = new Vector3(Random.Range(0, WorldXY), Random.Range(0, WorldXY), Random.Range(0, WorldXY));
             boids[i].vel = Random.insideUnitCircle;
         }
 
