@@ -29,7 +29,8 @@ public static class BoidParamsPresents
         SeperationDistance = 1f / 128f,
         SeperationWeight = 1f,
         AlignmentWeight = 1f,
-        CohesionWeight = 1f
+        CohesionWeight = 1f,
+        BoidSize = 1f
     };
 
 

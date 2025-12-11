@@ -2,16 +2,20 @@ using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.VFX;
 
 public class CellBoids : MonoBehaviour
 {
-    [SerializeField] int NumBoids = 100;
+    [SerializeField] public int NumBoids = 100;
 
-    [SerializeField] ComputeShader CellBoidsCompute;
-    [SerializeField] Material BoidMaterial;
-    [SerializeField] BoidParams boidParams = BoidParamsPresents.defaultParams;
+    [SerializeField] private ComputeShader CellBoidsCompute;
+    [SerializeField] private VisualEffect vfxGraph;
+    // [SerializeField] private Material BoidMaterial;
+    [SerializeField] private BoidParams boidParams = BoidParamsPresents.defaultParams;
+
     private BoidParams lastboidParams;
     private bool paramsChanged;
+
     [SerializeField] private bool debugRadix = false;
 
     private float WorldXY = 1f;
@@ -29,6 +33,11 @@ public class CellBoids : MonoBehaviour
     private ComputeBuffer BucketCounters;
     private ComputeBuffer BlockCounts;
     private ComputeBuffer BlockOffsets;
+
+    private RenderTexture positionMap;
+    private RenderTexture velocityMap;
+    private int texWidth;
+
     private int radix = 1 << 3;
     uint[] zeroArray;
     uint[] zeroBlockArray;
@@ -68,11 +77,11 @@ public class CellBoids : MonoBehaviour
             return;
         }
 
-        boidMesh = CreateQuad();
+        // boidMesh = CreateQuad();
 
-        BoidMaterial.SetBuffer("_Boids", Boids);
-        BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
-        BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
+        // BoidMaterial.SetBuffer("_Boids", Boids);
+        // BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
+        // BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
 
         IntializeKernelIndicies();
         InitializeBuffers();
@@ -217,7 +226,35 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetBuffer(updateKernel, "CellStart", CellStart);
         CellBoidsCompute.SetBuffer(updateKernel, "CellEnd", CellEnd);
 
+        //Boid textures
 
+        texWidth = Mathf.CeilToInt(Mathf.Sqrt(NumBoids));
+
+        positionMap = CreateMap(texWidth);
+        velocityMap = CreateMap(texWidth);
+
+        CellBoidsCompute.SetTexture(updateKernel, "PositionMap", positionMap);
+        CellBoidsCompute.SetTexture(updateKernel, "VelocityMap", velocityMap);
+        CellBoidsCompute.SetInt("_TexWidth", texWidth);
+
+        vfxGraph.SetTexture("PositionMap", positionMap);
+        vfxGraph.SetTexture("VelocityMap", velocityMap);
+        vfxGraph.SetInt("TexWidth", texWidth);
+        vfxGraph.SetInt("BoidCount", NumBoids);
+        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
+
+
+
+    }
+
+    RenderTexture CreateMap(int size)
+    {
+        // ARGBFloat is crucial! We need high precision for positions.
+        RenderTexture rt = new RenderTexture(size, size, 0, RenderTextureFormat.ARGBFloat);
+        rt.enableRandomWrite = true;
+        rt.filterMode = FilterMode.Point; // IMPORTANT: 'Point' prevents blurry data
+        rt.Create();
+        return rt;
     }
 
     private void SetNonUpdatingParams()
@@ -240,6 +277,7 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetFloat("_CohesionWeight", boidParams.CohesionWeight);
         CellBoidsCompute.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
         CellBoidsCompute.SetFloat("_MinSpeed", boidParams.MinSpeed);
+        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
     }
 
     void BoidsUpdate()
@@ -571,63 +609,63 @@ public class CellBoids : MonoBehaviour
         }
     }
 
-    void OnRenderObject()
-    {
-        if (BoidMaterial == null || Boids == null || boidMesh == null || Camera.current == null)
-        {
-            return;
-        }
+    // void OnRenderObject()
+    // {
+    //     if (BoidMaterial == null || Boids == null || boidMesh == null || Camera.current == null)
+    //     {
+    //         return;
+    //     }
 
 
-        if (Camera.current.cameraType != CameraType.Game && Camera.current.cameraType != CameraType.SceneView)
-        {
-            return;
-        }
+    //     if (Camera.current.cameraType != CameraType.Game && Camera.current.cameraType != CameraType.SceneView)
+    //     {
+    //         return;
+    //     }
 
-        BoidMaterial.SetBuffer("_Boids", Boids);
-        BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
-        BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
+    //     BoidMaterial.SetBuffer("_Boids", Boids);
+    //     BoidMaterial.SetFloat("_MinSpeed", boidParams.MinSpeed);
+    //     BoidMaterial.SetFloat("_MaxSpeed", boidParams.MaxSpeed);
 
-        BoidMaterial.SetColor("_Color1", slowColor);
-        BoidMaterial.SetColor("_Color2", fastColor);
+    //     BoidMaterial.SetColor("_Color1", slowColor);
+    //     BoidMaterial.SetColor("_Color2", fastColor);
 
-        Bounds bounds = new Bounds(Camera.main.transform.position, Vector3.one * 1000000f);
+    //     Bounds bounds = new Bounds(Camera.main.transform.position, Vector3.one * 1000000f);
 
-        BoidMaterial.SetPass(0);
+    //     BoidMaterial.SetPass(0);
 
-        Graphics.DrawMeshInstancedProcedural(
-            boidMesh,
-            0,
-            BoidMaterial,
-            bounds,
-            NumBoids
-        );
+    //     Graphics.DrawMeshInstancedProcedural(
+    //         boidMesh,
+    //         0,
+    //         BoidMaterial,
+    //         bounds,
+    //         NumBoids
+    //     );
 
-    }
+    // }
 
-    private Mesh CreateQuad()
-    {
-        Mesh mesh = new Mesh();
-        Vector3[] vertices = new Vector3[]
-        {
-            new Vector3(-0.01f * boidSize, -0.01f * boidSize, 0),
-            new Vector3(0.01f * boidSize, -0.01f * boidSize, 0),
-            new Vector3(-0.01f * boidSize, 0.01f * boidSize, 0),
-            new Vector3(0.01f * boidSize, 0.01f * boidSize, 0)
-        };
+    // private Mesh CreateQuad()
+    // {
+    //     Mesh mesh = new Mesh();
+    //     Vector3[] vertices = new Vector3[]
+    //     {
+    //         new Vector3(-0.01f * boidSize, -0.01f * boidSize, 0),
+    //         new Vector3(0.01f * boidSize, -0.01f * boidSize, 0),
+    //         new Vector3(-0.01f * boidSize, 0.01f * boidSize, 0),
+    //         new Vector3(0.01f * boidSize, 0.01f * boidSize, 0)
+    //     };
 
-        int[] tris = new int[]
-        {
-            0, 2, 1,
-            2, 3, 1
-        };
+    //     int[] tris = new int[]
+    //     {
+    //         0, 2, 1,
+    //         2, 3, 1
+    //     };
 
-        mesh.vertices = vertices;
-        mesh.triangles = tris;
-        mesh.RecalculateBounds();
+    //     mesh.vertices = vertices;
+    //     mesh.triangles = tris;
+    //     mesh.RecalculateBounds();
 
-        return mesh;
-    }
+    //     return mesh;
+    // }
 
     void OnDestroy()
     {
@@ -641,7 +679,8 @@ public class CellBoids : MonoBehaviour
         BucketCounters?.Release();
         BlockCounts?.Release();
         BlockOffsets?.Release();
-
+        positionMap?.Release();
+        velocityMap.Release();
     }
 
 

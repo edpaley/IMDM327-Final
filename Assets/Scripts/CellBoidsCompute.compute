@@ -65,6 +65,9 @@ float _MinSpeed;
 
 float _DeltaTime;
 
+RWTexture2D<float4> PositionMap;
+RWTexture2D<float4> VelocityMap;
+uint _TexWidth;
 
 uint3 CellCord(float3 pos)
 {
@@ -331,9 +334,14 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 
     b.pos += b.vel * _DeltaTime;
 
-    if(b.pos.x < 0 || b.pos.x >= 1) b.vel.x *= -1;
-    if(b.pos.y < 0 || b.pos.y >= 1) b.vel.y *= -1;
-    if(b.pos.z < 0 || b.pos.z >= 1) b.vel.z *= -1; 
+    if(b.pos.x < 0 || b.pos.x >= 1) { b.vel.x *= -1; b.pos.x = clamp(b.pos.x, 0, .9999); }
+    if(b.pos.y < 0 || b.pos.y >= 1) { b.vel.y *= -1; b.pos.y = clamp(b.pos.y, 0, .9999); }
+    if(b.pos.z < 0 || b.pos.z >= 1) { b.vel.z *= -1; b.pos.z = clamp(b.pos.z, 0, .9999); }
 
     Boids[id] = b;
+
+    uint2 uv = uint2(id % _TexWidth, id / _TexWidth);
+
+    PositionMap[uv] = float4(b.pos, 1.0);
+    VelocityMap[uv] = float4(b.vel, 1.0);
 }
