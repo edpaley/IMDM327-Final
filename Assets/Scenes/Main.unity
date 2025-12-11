@@ -179,7 +179,7 @@ Camera:
     height: 1
   near clip plane: 0.01
   far clip plane: 3
-  field of view: 60
+  field of view: 110
   orthographic: 0
   orthographic size: 0.6
   m_Depth: -1
@@ -206,7 +206,7 @@ Transform:
   m_GameObject: {fileID: 197942851}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.5, y: 0.5, z: 0}
+  m_LocalPosition: {x: 0.5, y: 0.5, z: -0.1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -299,9 +299,6 @@ MonoBehaviour:
     AlignmentWeight: 1
     BoidSize: 1
   debugRadix: 0
-  boidSize: 0.1
-  slowColor: {r: 0.3568441, g: 0.5079272, b: 0.9339623, a: 0}
-  fastColor: {r: 0.38203096, g: 0.9528302, b: 0.41964385, a: 0}
 --- !u!4 &473702599
 Transform:
   m_ObjectHideFlags: 0
