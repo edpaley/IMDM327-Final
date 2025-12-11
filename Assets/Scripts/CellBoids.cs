@@ -591,7 +591,7 @@ public class CellBoids : MonoBehaviour
         BoidMaterial.SetColor("_Color1", slowColor);
         BoidMaterial.SetColor("_Color2", fastColor);
 
-        Bounds bounds = new Bounds(Vector3.zero, Vector3.one * 20f);
+        Bounds bounds = new Bounds(Camera.main.transform.position, Vector3.one * 1000000f);
 
         BoidMaterial.SetPass(0);
 
@@ -602,6 +602,7 @@ public class CellBoids : MonoBehaviour
             bounds,
             NumBoids
         );
+
     }
 
     private Mesh CreateQuad()
