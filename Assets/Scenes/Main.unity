@@ -302,7 +302,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dd7af1eda97e72b4e8677e4d65423ef3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  NumBoids: 10000
+  NumBoids: 1000
   CellBoidsCompute: {fileID: 7200000, guid: 472e805eb3259654c9a11e886c38edda, type: 3}
   vfxGraph: {fileID: 1017141645}
   boidParams:
