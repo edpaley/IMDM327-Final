@@ -12,6 +12,8 @@ public struct BoidParams
     [Range(0f, 10f)] public float CohesionWeight;
     [Range(0f, 10f)] public float AlignmentWeight;
     [Range(0.001f, 10f)] public float BoidSize;
+    public float CenterPull;
+    public float CenterPush;
 
     public bool Equals(BoidParams other)
     {
@@ -24,8 +26,10 @@ public struct BoidParams
             CohesionWeight == other.CohesionWeight &&
             AlignmentWeight == other.AlignmentWeight &&
             present == other.present &&
-            BoidSize == other.BoidSize;
-            
+            BoidSize == other.BoidSize &&
+            CenterPull == other.CenterPull &&
+            CenterPull == other.CenterPush;
+
         return ret;
     }
 }

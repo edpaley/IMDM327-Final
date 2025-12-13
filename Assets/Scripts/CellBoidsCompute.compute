@@ -1,12 +1,9 @@
 #pragma kernel UpdateBoids
 #pragma kernel AssignCells
 #pragma kernel ClearCells
-// #pragma kernel RadSortCells
 #pragma kernel RadixClear
-//#pragma kernel RadixHistogram
 #pragma kernel RadixBlockHistogram
 #pragma kernel RadixPrefixSum
-//#pragma kernel RadixScatter
 #pragma kernel RadixScatterStable
 #pragma kernel BuildCellRanges
 
@@ -63,7 +60,16 @@ float _CohesionWeight;
 float _MaxSpeed; 
 float _MinSpeed;
 
+float _PullStrength;
+float _PushStrength;
+
+
 float _DeltaTime;
+
+float3 _Center;
+const float DistSqMap = 1.333f;
+const float pushRadius = .1f;
+const float maxDistance = .866f;
 
 RWTexture2D<float4> PositionMap;
 RWTexture2D<float4> VelocityMap;
@@ -103,6 +109,10 @@ uint3 UnflattedCord(uint flatCord)
 bool IsValidCell(int value)
 {
     return value >= 0 && value < _CellSeats;
+}
+
+float CubicBezier(float x, float p1, float p2) {
+    return 3 * (1 - x) * (1 - x) * x * p1 + 3 * (1 - x) * x * x * p2 + x * x * x;
 }
 
 
@@ -319,6 +329,27 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
     }
 
     float3 acceleration = cohesion + alignment + separation;
+
+
+    //below doesnt work properly. when push is set to 0, pull pulls not to the center but through 0,0,0 and 1,1,1, towards 0,0,0 if positive, towards 1,1,1 if negative
+    float3 toCenter = _Center - b.pos;
+    float dist = length(toCenter);
+    float3 dirToCenter = toCenter / (dist + 0.00001);
+
+    
+
+    if(dist < pushRadius)
+    {
+        float t = saturate(1 - (dist / pushRadius));
+        float strength = (CubicBezier(t, 0, 0)) * _PushStrength;
+        acceleration -= dirToCenter * strength;
+    }
+    else
+    {
+        float t = saturate((dist - pushRadius) / (maxDistance - pushRadius));
+        float strength = pow((CubicBezier(t, 0.1, 0.6)), 3)* _PullStrength;
+        acceleration += dirToCenter * strength;
+    }
 
     b.vel += acceleration * _DeltaTime;
 
