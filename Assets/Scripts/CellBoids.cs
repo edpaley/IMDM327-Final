@@ -253,7 +253,9 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetInt("_NumCells", NumCells);
         CellBoidsCompute.SetInt("_NullCell", unchecked((int)NullCell));
         CellBoidsCompute.SetInt("_NumGroups", boidGroup);
-        CellBoidsCompute.SetVector("_Center", new Vector3(0.5f, 0.5f, 0.5f));
+        Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+        CellBoidsCompute.SetFloat("_MaxDistance", center.magnitude);
+        CellBoidsCompute.SetVector("_Center", center);
     }
 
     private void SetBoidParams()
@@ -268,6 +270,7 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetFloat("_MinSpeed", boidParams.MinSpeed);
         CellBoidsCompute.SetFloat("_PullStrength", boidParams.CenterPull);
         CellBoidsCompute.SetFloat("_PushStrength", boidParams.CenterPush);
+        CellBoidsCompute.SetFloat("_PushRadius", boidParams.PushRadius);
         vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
     }
 

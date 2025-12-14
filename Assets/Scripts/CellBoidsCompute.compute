@@ -67,13 +67,19 @@ float _PushStrength;
 float _DeltaTime;
 
 float3 _Center;
-const float DistSqMap = 1.333f;
-const float pushRadius = .1f;
-const float maxDistance = .866f;
+float _PushRadius;
+float _MaxDistance;
 
 RWTexture2D<float4> PositionMap;
 RWTexture2D<float4> VelocityMap;
 uint _TexWidth;
+
+float Hash01Fast(uint x)
+{
+    x *= 747796405u;
+    x ^= x >> 16;
+    return (x & 0x00FFFFFF) / 16777216.0;
+}
 
 uint3 CellCord(float3 pos)
 {
@@ -317,15 +323,17 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 
     }
 
+    float rand = (Hash01Fast(id) + 0.1) * 3;
+
     if(neighborCount > 0)
     {
         float3 centerOfMass = cohesion / neighborCount;
-        cohesion = normalize(centerOfMass - b.pos) * _CohesionWeight;
+        cohesion = normalize(centerOfMass - b.pos) * _CohesionWeight * rand;
 
         float3 avgVel = alignment / neighborCount;
-        alignment = normalize(avgVel) * _AlignmentWeight;
+        alignment = normalize(avgVel) * _AlignmentWeight * rand;
 
-        separation *= _SeparationWeight;
+        separation *= _SeparationWeight * rand;
     }
 
     float3 acceleration = cohesion + alignment + separation;
@@ -338,27 +346,27 @@ void UpdateBoids (uint id : SV_DispatchThreadID)
 
     
 
-    if(dist < pushRadius)
+    if(dist < _PushRadius)
     {
-        float t = saturate(1 - (dist / pushRadius));
-        float strength = (CubicBezier(t, 0, 0)) * _PushStrength;
+        float t = saturate(1 - (dist / _PushRadius));
+        float strength = (CubicBezier(t, 1, .8)) * _PushStrength;
         acceleration -= dirToCenter * strength;
     }
     else
     {
-        float t = saturate((dist - pushRadius) / (maxDistance - pushRadius));
-        float strength = pow((CubicBezier(t, 0.1, 0.6)), 3)* _PullStrength;
+        float t = saturate((dist - _PushRadius) / (_MaxDistance - _PushRadius));
+        float strength = pow((CubicBezier(t, 0.1, 0.6)), 5)* _PullStrength;
         acceleration += dirToCenter * strength;
     }
 
-    b.vel += acceleration * _DeltaTime;
+    b.vel += acceleration * _DeltaTime / 3; // divide to smooth some
 
     float speed = length(b.vel);
-    if(speed > _MaxSpeed)
+    if(speed > _MaxSpeed * rand)
     {
         b.vel = normalize(b.vel) * _MaxSpeed;
     }
-    else if (speed < _MinSpeed)
+    else if (speed < _MinSpeed * rand)
     {
         b.vel = normalize(b.vel) * _MinSpeed;
     }

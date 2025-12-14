@@ -1,3 +1,4 @@
+
 using UnityEngine;
 
 [System.Serializable]
@@ -14,6 +15,7 @@ public struct BoidParams
     [Range(0.001f, 10f)] public float BoidSize;
     public float CenterPull;
     public float CenterPush;
+    [Range(0.1f, .833f)] public float PushRadius;
 
     public bool Equals(BoidParams other)
     {
@@ -28,7 +30,8 @@ public struct BoidParams
             present == other.present &&
             BoidSize == other.BoidSize &&
             CenterPull == other.CenterPull &&
-            CenterPull == other.CenterPush;
+            CenterPull == other.CenterPush &&
+            PushRadius == other.PushRadius;
 
         return ret;
     }
