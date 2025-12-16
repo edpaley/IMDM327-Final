@@ -231,7 +231,9 @@ public class CellBoids : MonoBehaviour
         vfxGraph.SetTexture("VelocityMap", velocityMap);
         vfxGraph.SetInt("TexWidth", texWidth);
         vfxGraph.SetInt("BoidCount", NumBoids);
-        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
+        float positionScale = (PositionMultiplier.x + PositionMultiplier.y + PositionMultiplier.z) / 3f;
+        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize * positionScale);
+        vfxGraph.SetVector3("PositionMultiplier", PositionMultiplier);
 
 
 
@@ -273,7 +275,8 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetFloat("_PullStrength", boidParams.CenterPull);
         CellBoidsCompute.SetFloat("_PushStrength", boidParams.CenterPush);
         CellBoidsCompute.SetFloat("_PushRadius", boidParams.PushRadius);
-        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
+        float positionScale = (PositionMultiplier.x + PositionMultiplier.y + PositionMultiplier.z) / 3f;
+        vfxGraph.SetFloat("BoidSize", boidParams.BoidSize * positionScale);
         vfxGraph.SetVector3("PositionMultiplier", PositionMultiplier);
     }
 

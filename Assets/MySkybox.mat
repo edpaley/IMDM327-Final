@@ -120,7 +120,7 @@ Material:
     - _CloudDensity: 0.2
     - _CloudOrentation: 0
     - _CloudRotation: 48
-    - _CloudSpeed: 2.5
+    - _CloudSpeed: 8
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1

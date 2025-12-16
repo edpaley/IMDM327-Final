@@ -148,23 +148,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dd7af1eda97e72b4e8677e4d65423ef3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  NumBoids: 10000
+  NumBoids: 6400
   CellBoidsCompute: {fileID: 7200000, guid: 472e805eb3259654c9a11e886c38edda, type: 3}
   vfxGraph: {fileID: 1017141645}
   boidParams:
     present: 1
     NeighborRadius: 0.12
-    MinSpeed: 0.06
-    MaxSpeed: 0.12
-    SeperationDistance: 0.01
+    MinSpeed: 0.025
+    MaxSpeed: 0.09
+    SeperationDistance: 0.0151
     SeperationWeight: 0.003
     CohesionWeight: 0.11
     AlignmentWeight: 0.14
-    BoidSize: 0.6
+    BoidSize: 0.4
     CenterPull: 2.64
     CenterPush: 0
     PushRadius: 0.1
-  PositionMultiplier: {x: 1, y: 1, z: 1}
+  PositionMultiplier: {x: 400, y: 300, z: 400}
   debugRadix: 0
 --- !u!4 &473702599
 Transform:
@@ -175,7 +175,7 @@ Transform:
   m_GameObject: {fileID: 473702597}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: -0.3, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -751,7 +751,7 @@ Transform:
   m_GameObject: {fileID: 1017141643}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: -200, y: 50, z: -200}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -983,8 +983,8 @@ MonoBehaviour:
     m_Bits: 1
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
-  m_RenderPostProcessing: 0
-  m_Antialiasing: 0
+  m_RenderPostProcessing: 1
+  m_Antialiasing: 1
   m_AntialiasingQuality: 2
   m_StopNaN: 0
   m_Dithering: 0
