@@ -2,6 +2,7 @@ using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 using UnityEngine.VFX;
 
 public class CellBoids : MonoBehaviour
@@ -11,6 +12,7 @@ public class CellBoids : MonoBehaviour
     [SerializeField] private ComputeShader CellBoidsCompute;
     [SerializeField] private VisualEffect vfxGraph;
     [SerializeField] private BoidParams boidParams = BoidParamsPresents.defaultParams;
+    [SerializeField] private Vector3 PositionMultiplier = new Vector3(1f, 1f, 1f);
 
     private BoidParams lastboidParams;
     private bool paramsChanged;
@@ -272,6 +274,7 @@ public class CellBoids : MonoBehaviour
         CellBoidsCompute.SetFloat("_PushStrength", boidParams.CenterPush);
         CellBoidsCompute.SetFloat("_PushRadius", boidParams.PushRadius);
         vfxGraph.SetFloat("BoidSize", boidParams.BoidSize);
+        vfxGraph.SetVector3("PositionMultiplier", PositionMultiplier);
     }
 
     void BoidsUpdate()
